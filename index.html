@@ -284,6 +284,17 @@
 
       <div class="kvs">
         <div class="kv">
+          <div class="k">Snapshot (selected date): Selected max / min</div>
+          <div class="v" id="snapSelected">—</div>
+        </div>
+        <div class="kv">
+          <div class="k">Snapshot (selected date): Baseline max / min</div>
+          <div class="v" id="snapBaseline">—</div>
+        </div>
+      </div>
+
+      <div class="kvs">
+        <div class="kv">
           <div class="k">Hottest-day avg (top 5% of daily highs) — selected</div>
           <div class="v" id="avgHotSelected">—</div>
         </div>
@@ -397,9 +408,9 @@
   const PHX_CENTER = { lat: 33.4484, lon: -112.0740 };
 
   const BASELINES = {
-    desert:  { lat: 33.8790, lon: -112.2600, label: "Desert baseline (NW desert fringe)" },
-    suburban:{ lat: 33.3703, lon: -112.5838, label: "Suburban baseline (Buckeye area)" },
-    downtown:{ lat: 33.4484, lon: -112.0740, label: "Downtown baseline (Phoenix core)" }
+    desert:   { lat: 33.8790, lon: -112.2600, label: "Desert baseline (NW desert fringe)" },
+    suburban: { lat: 33.3703, lon: -112.5838, label: "Suburban baseline (Buckeye area)" },
+    downtown: { lat: 33.4484, lon: -112.0740, label: "Downtown baseline (Phoenix core)" }
   };
 
   const GIBS_ENDPOINT = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best";
@@ -418,6 +429,10 @@
   function clamp(n, lo, hi){ return Math.max(lo, Math.min(hi, n)); }
   function cToF(c){ return (c * 9/5) + 32; }
 
+  function gibsUrlForDate(yyyy_mm_dd){
+    return `${GIBS_ENDPOINT}/${GIBS_LAYER}/default/${yyyy_mm_dd}/${GIBS_TILE_MATRIXSET}/{z}/{y}/{x}.${GIBS_FORMAT_EXT}`;
+  }
+
   const today = new Date();
   const fiveYearsAgo = addYears(today, -5);
 
@@ -431,10 +446,14 @@
   const gridSize = document.getElementById("gridSize");
   const unitNote = document.getElementById("unitNote");
 
+  const snapSelected = document.getElementById("snapSelected");
+  const snapBaseline = document.getElementById("snapBaseline");
+
   const avgHotSelected = document.getElementById("avgHotSelected");
   const avgHotBaseline = document.getElementById("avgHotBaseline");
   const avgWarmNightSelected = document.getElementById("avgWarmNightSelected");
   const avgWarmNightBaseline = document.getElementById("avgWarmNightBaseline");
+
   const uhiGapDay = document.getElementById("uhiGapDay");
   const uhiGapNight = document.getElementById("uhiGapNight");
   const riskLevel = document.getElementById("riskLevel");
@@ -459,6 +478,7 @@
   // Baseline state
   let baselineKey = baselineSelect.value;
   let baseline = BASELINES[baselineKey];
+
   function updateBaselineUI(){
     baselineKey = baselineSelect.value;
     baseline = BASELINES[baselineKey];
@@ -473,10 +493,6 @@
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
   }).addTo(map);
-
-  function gibsUrlForDate(yyyy_mm_dd){
-    return `${GIBS_ENDPOINT}/${GIBS_LAYER}/default/${yyyy_mm_dd}/${GIBS_TILE_MATRIXSET}/{z}/{y}/{x}.${GIBS_FORMAT_EXT}`;
-  }
 
   let gibsLayer = L.tileLayer(gibsUrlForDate(lstDateInput.value), {
     opacity: 0.70,
@@ -589,6 +605,32 @@
     const tmax = (typeof raw === "number" && !Number.isNaN(raw)) ? raw : null;
 
     return convertIfCelsiusValue(tmax, unit);
+  }
+
+  async function fetchOpenMeteoDailyMaxMinForOneDay(lat, lon, dateStr){
+    const url = new URL(OPEN_METEO_ARCHIVE);
+    url.searchParams.set("latitude", lat);
+    url.searchParams.set("longitude", lon);
+    url.searchParams.set("start_date", dateStr);
+    url.searchParams.set("end_date", dateStr);
+    url.searchParams.set("daily", "temperature_2m_max,temperature_2m_min");
+    url.searchParams.set("temperature_unit", "fahrenheit");
+    url.searchParams.set("timezone", "auto");
+
+    const res = await fetch(url.toString());
+    if(!res.ok) throw new Error(`Open-Meteo (one-day) failed: ${res.status}`);
+    const json = await res.json();
+
+    const unitMax = json?.daily_units?.temperature_2m_max || "";
+    const unitMin = json?.daily_units?.temperature_2m_min || "";
+
+    const rawMax = json?.daily?.temperature_2m_max?.[0];
+    const rawMin = json?.daily?.temperature_2m_min?.[0];
+
+    const tmax = convertIfCelsiusValue(rawMax, unitMax);
+    const tmin = convertIfCelsiusValue(rawMin, unitMin);
+
+    return { tmax, tmin };
   }
 
   function topPercentAverage(arr, topFraction){
@@ -790,11 +832,16 @@
     if(selectedLatLon) await handleMapSelection(selectedLatLon.lat, selectedLatLon.lon);
   });
 
+  // IMPORTANT: changing the date should update:
+  // 1) NASA tile
+  // 2) heat visuals dots
+  // 3) snapshot max/min values
   lstDateInput.addEventListener("change", async () => {
     const d = lstDateInput.value;
     gibsLayer.setUrl(gibsUrlForDate(d));
-    if(selectedLatLon && heatOn.value === "on"){
-      await refreshHeatVisuals(selectedLatLon.lat, selectedLatLon.lon);
+
+    if(selectedLatLon){
+      await handleMapSelection(selectedLatLon.lat, selectedLatLon.lon);
     }
   });
 
@@ -806,10 +853,6 @@
   gridSize.addEventListener("change", async () => {
     if(heatOn.value === "on" && selectedLatLon) await refreshHeatVisuals(selectedLatLon.lat, selectedLatLon.lon);
   });
-
-  function gibsUrlForDate(yyyy_mm_dd){
-    return `${GIBS_ENDPOINT}/${GIBS_LAYER}/default/${yyyy_mm_dd}/${GIBS_TILE_MATRIXSET}/{z}/{y}/{x}.${GIBS_FORMAT_EXT}`;
-  }
 
   // Click to select
   map.on("click", async (e) => {
@@ -828,21 +871,40 @@
     updateBaselineUI();
     refreshBaselineMarker();
 
-    setStatus("warn", "Fetching 5-year highs + lows…");
+    setStatus("warn", "Fetching snapshot + 5-year data…");
 
     try{
       const start = isoDate(fiveYearsAgo);
       const end = isoDate(today);
 
+      // 5-year series
       const [sel, base] = await Promise.all([
         fetchOpenMeteoDailyMaxMin(lat, lon, start, end),
         fetchOpenMeteoDailyMaxMin(baseline.lat, baseline.lon, start, end),
       ]);
 
-      // Show unit info for debugging confidence
-      unitNote.textContent =
-        `Open-Meteo units returned: max=${sel.unitsMax || "?"}, min=${sel.unitsMin || "?"} (converted only if units were °C).`;
+      // Snapshot for selected date (explains map dots)
+      const snapDate = lstDateInput.value;
+      const [snapSel, snapBase] = await Promise.all([
+        fetchOpenMeteoDailyMaxMinForOneDay(lat, lon, snapDate),
+        fetchOpenMeteoDailyMaxMinForOneDay(baseline.lat, baseline.lon, snapDate),
+      ]);
 
+      snapSelected.textContent =
+        (snapSel.tmax == null || snapSel.tmin == null)
+          ? "No data for this date"
+          : `Max ${snapSel.tmax.toFixed(1)}°F | Min ${snapSel.tmin.toFixed(1)}°F`;
+
+      snapBaseline.textContent =
+        (snapBase.tmax == null || snapBase.tmin == null)
+          ? "No data for this date"
+          : `Max ${snapBase.tmax.toFixed(1)}°F | Min ${snapBase.tmin.toFixed(1)}°F`;
+
+      // Show unit info (useful for teacher debugging)
+      unitNote.textContent =
+        `Open-Meteo units returned (5-year): max=${sel.unitsMax || "?"}, min=${sel.unitsMin || "?"} (converted only if units were °C).`;
+
+      // Chart
       tempChart.data.labels = sel.times;
       tempChart.data.datasets[0].data = sel.tmax;
       tempChart.data.datasets[1].data = base.tmax;
@@ -850,6 +912,7 @@
       tempChart.data.datasets[3].data = base.tmin;
       tempChart.update();
 
+      // 5-year summary stats
       const hotSel = topPercentAverage(sel.tmax, 0.05);
       const hotBase = topPercentAverage(base.tmax, 0.05);
       avgHotSelected.textContent = hotSel == null ? "—" : `${hotSel.toFixed(1)}°F`;
@@ -897,6 +960,10 @@
 At ${loc}, the hottest-day average (top 5% of daily highs) over the last 5 years is ${avgHotSelected.textContent}, compared to ${avgHotBaseline.textContent} for the baseline (${baseLabel}, ${baseCoords}). This gives a Day UHI gap of ${uhiGapDay.textContent}.
 
 The warmest-night average (top 5% of daily lows) over the last 5 years is ${avgWarmNightSelected.textContent} at ${loc}, compared to ${avgWarmNightBaseline.textContent} at the baseline. This gives a Night UHI gap of ${uhiGapNight.textContent}.
+
+Snapshot (selected date) — explains map colors:
+Selected: ${snapSelected.textContent}
+Baseline: ${snapBaseline.textContent}
 
 Heat visuals (air temp max overlay) date:
 ${date}
