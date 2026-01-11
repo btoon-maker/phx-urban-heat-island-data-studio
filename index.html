@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Phoenix Urban Heat Island Data Studio</title>
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f1a2e;
+      --panel2:#101f38;
+      --text:#e9eefc;
+      --muted:#a9b7dd;
+      --accent:#66b3ff;
+      --border:rgba(255,255,255,.10);
+      --good:#7ee787;
+      --warn:#f7c843;
+      --bad:#ff7b72;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background:linear-gradient(180deg,#070b14 0%, #0b1220 40%, #070b14 100%);
+      color:var(--text);
+    }
+    header{
+      padding:16px 18px 10px;
+      border-bottom:1px solid var(--border);
+      background:rgba(0,0,0,.25);
+      position:sticky; top:0; z-index:5;
+      backdrop-filter: blur(10px);
+    }
+    header h1{
+      margin:0 0 6px;
+      font-size:18px;
+      letter-spacing:.2px;
+    }
+    header p{
+      margin:0;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.35;
+    }
+
+    .wrap{
+      display:grid;
+      grid-template-columns: 360px 1fr;
+      gap:12px;
+      padding:12px;
+      align-items:start;
+    }
+    @media (max-width: 980px){
+      .wrap{ grid-template-columns: 1fr; }
+    }
+
+    .panel{
+      background:linear-gradient(180deg,var(--panel) 0%, var(--panel2) 100%);
+      border:1px solid var(--border);
+      border-radius:14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      overflow:hidden;
+    }
+    .panel .hd{
+      padding:12px 12px 10px;
+      border-bottom:1px solid var(--border);
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .panel .hd h2{
+      margin:0;
+      font-size:14px;
+      letter-spacing:.2px;
+    }
+    .panel .bd{
+      padding:12px;
+    }
+
+    .row{ display:flex; gap:10px; flex-wrap:wrap; }
+    .row > *{ flex: 1 1 auto; }
+
+    label{ display:block; font-size:12px; color:var(--muted); margin:0 0 6px; }
+    input[type="date"], input[type="range"], select, button{
+      width:100%;
+      background:rgba(255,255,255,.06);
+      border:1px solid var(--border);
+      color:var(--text);
+      padding:9px 10px;
+      border-radius:10px;
+      outline:none;
+    }
+    input[type="range"]{ padding:0; height:34px; }
+    button{
+      cursor:pointer;
+      background:rgba(102,179,255,.15);
+      border:1px solid rgba(102,179,255,.35);
+      font-weight:600;
+    }
+    button:hover{ filter:brightness(1.08); }
+
+    .kvs{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+      margin-top:10px;
+    }
+    .kv{
+      padding:10px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:rgba(0,0,0,.18);
+    }
+    .kv .k{ font-size:11px; color:var(--muted); margin-bottom:6px; }
+    .kv .v{ font-size:14px; font-weight:700; }
+    .pill{
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+      padding:7px 10px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:rgba(0,0,0,.18);
+      font-size:12px;
+      color:var(--muted);
+    }
+    .statusDot{
+      width:8px; height:8px; border-radius:50%;
+      background:rgba(255,255,255,.35);
+      display:inline-block;
+    }
+    .statusDot.ok{ background: var(--good); }
+    .statusDot.warn{ background: var(--warn); }
+    .statusDot.bad{ background: var(--bad); }
+
+    #map{
+      width:100%;
+      height: 520px;
+      border-radius:14px;
+      overflow:hidden;
+    }
+    @media (max-width: 980px){
+      #map{ height: 420px; }
+    }
+
+    .chartWrap{
+      padding:12px;
+      border-top:1px solid var(--border);
+    }
+    canvas{ background:rgba(0,0,0,.08); border:1px solid var(--border); border-radius:12px; }
+
+    .note{
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.45;
+      margin-top:10px;
+    }
+    a{ color: var(--accent); }
+    .small{ font-size:11px; color:var(--muted); }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>Phoenix Urban Heat Island Data Studio</h1>
+  <p>
+    Click anywhere on the map to investigate heat. Use the date selector to view NASA satellite Land Surface Temperature (LST) imagery,
+    then analyze 5-year temperature trends and make a mitigation decision.
+  </p>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: Controls + Decision Panel -->
+  <section class="panel">
+    <div class="hd">
+      <h2>Controls + Decision Studio</h2>
+      <span class="pill"><span id="fetchDot" class="statusDot"></span><span id="fetchText">Ready</span></span>
+    </div>
+
+    <div class="bd">
+      <div class="row">
+        <div>
+          <label for="lstDate">Satellite map date (LST overlay)</label>
+          <input type="date" id="lstDate" />
+          <div class="small" style="margin-top:6px;">
+            NASA GIBS tiles update by day (WMTS time dimension). :contentReference[oaicite:3]{index=3}
+          </div>
+        </div>
+      </div>
+
+      <div class="kvs">
+        <div class="kv">
+          <div class="k">Selected location</div>
+          <div class="v mono" id="locText">Click the map</div>
+        </div>
+        <div class="kv">
+          <div class="k">Compare to rural baseline</div>
+          <div class="v" id="baselineText">Buckeye area</div>
+        </div>
+      </div>
+
+      <div class="kvs">
+        <div class="kv">
+          <div class="k">5-year hottest-day average (selected)</div>
+          <div class="v" id="avgHotSelected">—</div>
+        </div>
+        <div class="kv">
+          <div class="k">5-year hottest-day average (baseline)</div>
+          <div class="v" id="avgHotBaseline">—</div>
+        </div>
+      </div>
+
+      <div class="kvs">
+        <div class="kv">
+          <div class="k">Urban Heat Island gap (selected − baseline)</div>
+          <div class="v" id="uhiGap">—</div>
+        </div>
+        <div class="kv">
+          <div class="k">Heat Risk (simple model)</div>
+          <div class="v" id="riskLevel">—</div>
+        </div>
+      </div>
+
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+
+      <h2 style="margin:0 0 10px; font-size:14px;">Mitigation Simulator (student-facing)</h2>
+
+      <div class="row">
+        <div>
+          <label for="trees">Increase tree canopy (%)</label>
+          <input type="range" id="trees" min="0" max="40" step="1" value="10" />
+          <div class="small"><span id="treesVal">10</span>%</div>
+        </div>
+        <div>
+          <label for="coolroofs">Cool roofs / reflective surfaces (%)</label>
+          <input type="range" id="coolroofs" min="0" max="60" step="1" value="15" />
+          <div class="small"><span id="coolVal">15</span>%</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="impervious">Reduce dark pavement / impervious surface (%)</label>
+          <input type="range" id="impervious" min="0" max="35" step="1" value="5" />
+          <div class="small"><span id="impVal">5</span>%</div>
+        </div>
+      </div>
+
+      <div class="kvs">
+        <div class="kv">
+          <div class="k">Estimated peak temperature reduction</div>
+          <div class="v" id="mitigationDelta">—</div>
+          <div class="small">Simplified classroom model (not a forecast).</div>
+        </div>
+        <div class="kv">
+          <div class="k">Revised Heat Risk</div>
+          <div class="v" id="riskAfter">—</div>
+          <div class="small">Based on estimated reduction.</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="copyClaim">Copy a data-informed claim</button>
+      </div>
+
+      <div class="note">
+        <strong>Data sources:</strong>
+        Satellite LST overlay from NASA GIBS (WMTS). :contentReference[oaicite:4]{index=4}
+        Temperature time-series from Open-Meteo Historical Weather API (reanalysis; no API key). :contentReference[oaicite:5]{index=5}
+      </div>
+
+      <div class="note small">
+        If the heat overlay appears blank, change <span class="mono">GIBS_TILE_MATRIXSET</span> in the code to another option:
+        <span class="mono">GoogleMapsCompatible_Level6</span>, <span class="mono">_Level7</span>, <span class="mono">_Level8</span>, or <span class="mono">_Level9</span>.
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Map + Charts -->
+  <section class="panel">
+    <div class="hd">
+      <h2>Map + Data Explorer</h2>
+      <span class="pill"><span class="statusDot ok"></span>Click a location to load last 5 years</span>
+    </div>
+
+    <div class="bd">
+      <div id="map"></div>
+    </div>
+
+    <div class="chartWrap">
+      <h2 style="margin:0 0 10px; font-size:14px;">5-Year Daily Max Temperature (Selected vs Baseline)</h2>
+      <canvas id="tempChart" height="120"></canvas>
+
+      <div class="note">
+        Classroom idea: Have students identify (1) trends, (2) seasonal spikes, and (3) “heat event” periods, then support a mitigation choice
+        with evidence.
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  /******************************************************************
+   * Phoenix Urban Heat Island Data Studio
+   * - Map: Leaflet + NASA GIBS Land Surface Temp (Day) overlay (date-controlled)
+   * - Charts: Open-Meteo Archive API (5-year daily max temperature) (no API key)
+   * - Decision: simple risk classification + mitigation slider model
+   ******************************************************************/
+
+  // ----------- CONFIG -----------
+  // Phoenix center (Downtown)
+  const PHX = { lat: 33.4484, lon: -112.0740 };
+
+  // Rural-ish baseline point (west of Phoenix near Buckeye)
+  const BASELINE = { lat: 33.3703, lon: -112.5838, label: "Buckeye area (baseline)" };
+
+  // NASA GIBS WMTS REST pattern for EPSG:3857 (Web Mercator):
+  // https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{LayerIdentifier}/default/{Time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.{FormatExt}
+  // :contentReference[oaicite:6]{index=6}
+  const GIBS_ENDPOINT = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best";
+  const GIBS_LAYER = "MODIS_Terra_Land_Surface_Temp_Day"; // common layer identifier used in catalogs
+  // If tiles are blank, try Level6, Level8, or Level9:
+  const GIBS_TILE_MATRIXSET = "GoogleMapsCompatible_Level7";
+  const GIBS_FORMAT_EXT = "png";
+
+  // Open-Meteo archive endpoint (no API key required)
+  // :contentReference[oaicite:7]{index=7}
+  const OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive";
+
+  // 5-year range helper
+  function isoDate(d){ return d.toISOString().slice(0,10); }
+  function addYears(date, years){
+    const d = new Date(date);
+    d.setFullYear(d.getFullYear() + years);
+    return d;
+  }
+
+  const today = new Date();
+  const fiveYearsAgo = addYears(today, -5);
+
+  // ----------- UI refs -----------
+  const fetchDot = document.getElementById("fetchDot");
+  const fetchText = document.getElementById("fetchText");
+  const lstDateInput = document.getElementById("lstDate");
+  const locText = document.getElementById("locText");
+
+  const avgHotSelected = document.getElementById("avgHotSelected");
+  const avgHotBaseline = document.getElementById("avgHotBaseline");
+  const uhiGap = document.getElementById("uhiGap");
+  const riskLevel = document.getElementById("riskLevel");
+  const mitigationDelta = document.getElementById("mitigationDelta");
+  const riskAfter = document.getElementById("riskAfter");
+
+  const trees = document.getElementById("trees");
+  const coolroofs = document.getElementById("coolroofs");
+  const impervious = document.getElementById("impervious");
+  const treesVal = document.getElementById("treesVal");
+  const coolVal = document.getElementById("coolVal");
+  const impVal = document.getElementById("impVal");
+
+  const copyClaimBtn = document.getElementById("copyClaim");
+
+  // Default LST date to ~3 days ago to reduce chance of "no data yet"
+  const lstDefault = new Date();
+  lstDefault.setDate(lstDefault.getDate() - 3);
+  lstDateInput.value = isoDate(lstDefault);
+
+  // ----------- MAP -----------
+  const map = L.map("map", { zoomControl: true }).setView([PHX.lat, PHX.lon], 10);
+
+  const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  function gibsUrlForDate(yyyy_mm_dd){
+    // Leaflet uses {z}/{x}/{y}. GIBS expects {TileMatrix}/{TileCol}/{TileRow}
+    // which matches {z}/{x}/{y} in practice for GoogleMapsCompatible tile sets.
+    return `${GIBS_ENDPOINT}/${GIBS_LAYER}/default/${yyyy_mm_dd}/${GIBS_TILE_MATRIXSET}/{z}/{y}/{x}.${GIBS_FORMAT_EXT}`;
+  }
+
+  let gibsLayer = L.tileLayer(gibsUrlForDate(lstDateInput.value), {
+    opacity: 0.70,
+    maxZoom: 9,  // many GIBS products cap at lower zooms; keep conservative
+    attribution: 'NASA GIBS (Land Surface Temperature)'
+  }).addTo(map);
+
+  // Baseline marker
+  const baselineMarker = L.circleMarker([BASELINE.lat, BASELINE.lon], {
+    radius: 6, weight: 2, color: "#66b3ff", fillColor:"#66b3ff", fillOpacity: 0.25
+  }).addTo(map).bindPopup(`<b>Baseline:</b> ${BASELINE.label}<br>${BASELINE.lat.toFixed(4)}, ${BASELINE.lon.toFixed(4)}`);
+
+  let selectedMarker = null;
+
+  lstDateInput.addEventListener("change", () => {
+    const d = lstDateInput.value;
+    gibsLayer.setUrl(gibsUrlForDate(d));
+  });
+
+  // ----------- CHART -----------
+  const ctx = document.getElementById("tempChart");
+  let tempChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        { label: "Selected: Daily Max Temp (°F)", data: [], borderWidth: 2, pointRadius: 0, tension: 0.15 },
+        { label: "Baseline: Daily Max Temp (°F)", data: [], borderWidth: 2, pointRadius: 0, tension: 0.15 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#e9eefc" } },
+        tooltip: { mode: "index", intersect: false }
+      },
+      scales: {
+        x: { ticks: { color: "#a9b7dd", maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,.06)" } },
+        y: { ticks: { color: "#a9b7dd" }, grid: { color: "rgba(255,255,255,.06)" } }
+      }
+    }
+  });
+
+  // ----------- DATA FETCHING -----------
+  function setStatus(state, text){
+    fetchText.textContent = text;
+    fetchDot.className = "statusDot";
+    if(state === "ok") fetchDot.classList.add("ok");
+    if(state === "warn") fetchDot.classList.add("warn");
+    if(state === "bad") fetchDot.classList.add("bad");
+  }
+
+  async function fetchOpenMeteoDailyMax(lat, lon, start, end){
+    // Open-Meteo archive example: /v1/archive?latitude=...&longitude=...&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&daily=temperature_2m_max&temperature_unit=fahrenheit&timezone=auto
+    const url = new URL(OPEN_METEO_ARCHIVE);
+    url.searchParams.set("latitude", lat);
+    url.searchParams.set("longitude", lon);
+    url.searchParams.set("start_date", start);
+    url.searchParams.set("end_date", end);
+    url.searchParams.set("daily", "temperature_2m_max");
+    url.searchParams.set("temperature_unit", "fahrenheit");
+    url.searchParams.set("timezone", "auto");
+
+    const res = await fetch(url.toString());
+    if(!res.ok) throw new Error(`Open-Meteo request failed: ${res.status}`);
+    const json = await res.json();
+    const times = json?.daily?.time || [];
+    const tmax = json?.daily?.temperature_2m_max || [];
+    return { times, tmax };
+  }
+
+  function summarizeHottestDaysAvg(tmaxArr){
+    // Average of the hottest 5% of days (simple "heat event" summary)
+    const clean = tmaxArr.filter(v => typeof v === "number" && !Number.isNaN(v));
+    if(clean.length < 10) return null;
+    const sorted = [...clean].sort((a,b)=>a-b);
+    const topCount = Math.max(1, Math.floor(sorted.length * 0.05));
+    const top = sorted.slice(sorted.length - topCount);
+    const avg = top.reduce((s,v)=>s+v,0) / top.length;
+    return avg;
+  }
+
+  function classifyHeatRisk(peakF, uhiGapF){
+    // Simple classroom model:
+    // - peak drives immediate risk
+    // - UHI gap adds “nighttime/retained heat” proxy influence (not perfect)
+    // This is intentionally transparent & explainable for students.
+    if(peakF == null) return "—";
+
+    let score = 0;
+    if(peakF >= 115) score += 3;
+    else if(peakF >= 105) score += 2;
+    else if(peakF >= 95) score += 1;
+
+    if(uhiGapF != null){
+      if(uhiGapF >= 6) score += 2;
+      else if(uhiGapF >= 3) score += 1;
+    }
+
+    if(score >= 4) return "Extreme";
+    if(score === 3) return "High";
+    if(score === 2) return "Moderate";
+    return "Low";
+  }
+
+  function mitigationModelDeltaF(){
+    // Very simplified effect sizes (student-facing model):
+    // - canopy increase cools by shade + evapotranspiration
+    // - cool roofs reduce absorbed solar radiation
+    // - impervious reduction increases infiltration/less heat storage
+    //
+    // These are NOT forecasts; they are "what-if" reasoning tools.
+    const t = Number(trees.value);
+    const c = Number(coolroofs.value);
+    const i = Number(impervious.value);
+
+    // Tunable coefficients (kept conservative):
+    const delta = (t * 0.08) + (c * 0.05) + (i * 0.07); // °F reduction
+    return Math.min(8, Math.max(0, delta)); // cap at 8°F for realism in a simple model
+  }
+
+  function updateMitigationOutputs(){
+    treesVal.textContent = trees.value;
+    coolVal.textContent = coolroofs.value;
+    impVal.textContent = impervious.value;
+
+    const basePeak = window.__selectedPeakF ?? null;
+    const gap = window.__uhiGapF ?? null;
+
+    const delta = mitigationModelDeltaF();
+    if(basePeak == null){
+      mitigationDelta.textContent = "—";
+      riskAfter.textContent = "—";
+      return;
+    }
+
+    const newPeak = basePeak - delta;
+    mitigationDelta.textContent = `−${delta.toFixed(1)}°F`;
+    riskAfter.textContent = classifyHeatRisk(newPeak, gap);
+  }
+
+  [trees, coolroofs, impervious].forEach(el => el.addEventListener("input", updateMitigationOutputs));
+
+  // Map click -> fetch data
+  map.on("click", async (e) => {
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
+
+    // Marker
+    if(selectedMarker) map.removeLayer(selectedMarker);
+    selectedMarker = L.circleMarker([lat, lon], {
+      radius: 7, weight: 2, color: "#ffffff", fillColor:"#ffffff", fillOpacity: 0.20
+    }).addTo(map);
+
+    locText.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+    setStatus("warn", "Fetching 5-year temps…");
+
+    try{
+      // Fetch selected + baseline in parallel
+      const start = isoDate(fiveYearsAgo);
+      const end = isoDate(today);
+
+      const [sel, base] = await Promise.all([
+        fetchOpenMeteoDailyMax(lat, lon, start, end),
+        fetchOpenMeteoDailyMax(BASELINE.lat, BASELINE.lon, start, end),
+      ]);
+
+      // Align by time labels (they should match if same timezone rules)
+      const labels = sel.times;
+      tempChart.data.labels = labels;
+
+      tempChart.data.datasets[0].data = sel.tmax;
+      tempChart.data.datasets[1].data = base.tmax;
+      tempChart.update();
+
+      // Summaries
+      const avgSel = summarizeHottestDaysAvg(sel.tmax);
+      const avgBase = summarizeHottestDaysAvg(base.tmax);
+
+      avgHotSelected.textContent = avgSel == null ? "—" : `${avgSel.toFixed(1)}°F`;
+      avgHotBaseline.textContent = avgBase == null ? "—" : `${avgBase.toFixed(1)}°F`;
+
+      const gap = (avgSel != null && avgBase != null) ? (avgSel - avgBase) : null;
+      uhiGap.textContent = gap == null ? "—" : `${gap.toFixed(1)}°F`;
+
+      // Store for mitigation calculations
+      window.__selectedPeakF = avgSel;
+      window.__uhiGapF = gap;
+
+      const risk = classifyHeatRisk(avgSel, gap);
+      riskLevel.textContent = risk;
+
+      updateMitigationOutputs();
+
+      setStatus("ok", "Updated");
+    }catch(err){
+      console.error(err);
+      setStatus("bad", "Error fetching data");
+      avgHotSelected.textContent = "—";
+      avgHotBaseline.textContent = "—";
+      uhiGap.textContent = "—";
+      riskLevel.textContent = "—";
+      mitigationDelta.textContent = "—";
+      riskAfter.textContent = "—";
+      alert("Data fetch failed. Try clicking another point, or try again later.");
+    }
+  });
+
+  // Copy claim button
+  copyClaimBtn.addEventListener("click", async () => {
+    const loc = locText.textContent;
+    const avgSel = avgHotSelected.textContent;
+    const avgBase = avgHotBaseline.textContent;
+    const gap = uhiGap.textContent;
+    const risk = riskLevel.textContent;
+    const delta = mitigationDelta.textContent;
+    const risk2 = riskAfter.textContent;
+
+    const date = lstDateInput.value;
+
+    const claim =
+`Claim (Data-Informed):
+At location ${loc}, the average of the hottest days over the last 5 years is ${avgSel}, compared to ${avgBase} at the baseline location. This suggests an urban heat island gap of about ${gap}. Based on this evidence, the current heat risk is rated: ${risk}.
+
+Satellite context:
+NASA satellite Land Surface Temperature (LST) overlay date used: ${date}.
+
+Decision:
+If we increase tree canopy to ${trees.value}%, cool-roof adoption to ${coolroofs.value}%, and reduce dark pavement by ${impervious.value}%, the model estimates a peak reduction of ${delta}, changing risk to: ${risk2}.
+
+Evidence note:
+Open-Meteo historical temperatures are modelled/reanalysis estimates; use them to compare patterns, trends, and differences rather than exact street-level temperatures.`;
+
+    try{
+      await navigator.clipboard.writeText(claim);
+      setStatus("ok", "Claim copied!");
+      setTimeout(() => setStatus("ok", "Updated"), 1200);
+    }catch{
+      alert("Copy failed. You can manually copy the claim from the browser console.");
+      console.log(claim);
+    }
+  });
+
+  // Initial status
+  setStatus("ok", "Ready");
+  updateMitigationOutputs();
+</script>
+</body>
+</html>
